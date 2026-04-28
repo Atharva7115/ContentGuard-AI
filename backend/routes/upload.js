@@ -1,72 +1,91 @@
-import express from "express";
-import multer from "multer";
-import { Storage } from "@google-cloud/storage";
-import path from "path";
-import fs from "fs";
+/**
+ * Upload Route
+ * POST /api/upload - Accept video file, upload to Cloudinary, return URL.
+ */
 
-const router = express.Router();
+import express from 'express'
+import multer from 'multer'
+import path from 'path'
+import fs from 'fs'
+import { uploadVideo } from '../services/cloudinaryService.js'
+import { detectionStore } from '../utils/store.js'
 
-// ===============================
-// 🔹 1. Multer Setup (Temp Storage)
-// ===============================
-const upload = multer({ dest: "uploads/" });
+const router = express.Router()
 
-// ===============================
-// 🔹 2. Google Cloud Storage Setup
-// ===============================
-const storage = new Storage({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS, // path to service account key
-});
+// ─── Multer Setup (Temp Storage) ────────────────────────────────
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = './uploads'
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
+    cb(null, uploadDir)
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `${Date.now()}-${file.originalname}`
+    cb(null, uniqueName)
+  }
+})
 
-const bucketName = process.env.GCLOUD_BUCKET;
-const bucket = storage.bucket(bucketName);
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB
+  fileFilter: (req, file, cb) => {
+    const videoTypes = /mp4|mov|avi|mkv|webm|flv|wmv/
+    const ext = path.extname(file.originalname).toLowerCase().slice(1)
+    if (videoTypes.test(ext) || file.mimetype.startsWith('video/')) {
+      cb(null, true)
+    } else {
+      cb(new Error('Only video files are allowed'), false)
+    }
+  }
+})
 
-// ===============================
-// 🔹 3. Upload Route
-// ===============================
-router.post("/", upload.single("file"), async (req, res) => {
+// ─── POST /api/upload ───────────────────────────────────────────
+router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const file = req.file;
-
+    const file = req.file
     if (!file) {
-      return res.status(400).json({ error: "No file uploaded" });
+      return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    // Create unique filename
-    const blobName = `${Date.now()}-${file.originalname}`;
-    const blob = bucket.file(blobName);
+    console.log(`📁 File received: ${file.originalname} (${(file.size / (1024*1024)).toFixed(1)} MB)`)
 
-    // Upload file to GCS
-    const blobStream = blob.createWriteStream({
-      resumable: false,
-    });
+    // Upload to Cloudinary
+    const result = await uploadVideo(file.path, file.originalname)
 
-    blobStream.on("error", (err) => {
-      console.error(err);
-      res.status(500).json({ error: "Upload failed" });
-    });
+    // Clean up temp file
+    try { fs.unlinkSync(file.path) } catch {}
 
-    blobStream.on("finish", async () => {
-      // Make file public
-      await blob.makePublic();
+    // Store content metadata for dashboard
+    const contentItem = {
+      id: detectionStore.contentList.length + 1,
+      title: file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
+      thumbnail: result.url.replace(/\.[^.]+$/, '.jpg'), // Cloudinary auto-generates thumbnails
+      uploadDate: new Date().toISOString().split('T')[0],
+      status: 'active',
+      matches: 0,
+      videoUrl: result.url,
+      publicId: result.publicId
+    }
+    detectionStore.contentList.push(contentItem)
 
-      const publicUrl = `https://storage.googleapis.com/${bucketName}/${blobName}`;
+    res.json({
+      success: true,
+      message: 'File uploaded successfully',
+      url: result.url,
+      contentId: contentItem.id,
+      fileName: file.originalname
+    })
 
-      // Delete temp file
-      fs.unlinkSync(file.path);
-
-      res.json({
-        message: "File uploaded successfully",
-        url: publicUrl,
-      });
-    });
-
-    // Read temp file and pipe to GCS
-    fs.createReadStream(file.path).pipe(blobStream);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Something went wrong" });
+    // Clean up temp file on error
+    if (req.file) {
+      try { fs.unlinkSync(req.file.path) } catch {}
+    }
+    console.error('❌ Upload error:', error.message)
+    res.status(500).json({ error: 'Upload failed', message: error.message })
   }
-});
+})
 
-export default router;
+export default router

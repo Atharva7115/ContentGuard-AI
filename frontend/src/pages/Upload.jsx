@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import Card from '../components/Card'
+import { uploadVideo, detectSimilarity } from '../utils/api'
 
 export default function Upload() {
   const [uploading, setUploading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [file, setFile] = useState(null)
+  const [error, setError] = useState(null)
+  const [results, setResults] = useState(null)
 
   const processingSteps = [
     { name: 'Extracting frames', duration: 2000 },
@@ -18,29 +21,58 @@ export default function Upload() {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       setFile(selectedFile)
+      setError(null)
+      setResults(null)
       handleUpload(selectedFile)
     }
   }
 
   const handleUpload = async (uploadedFile) => {
     setUploading(true)
-    
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
-    setUploading(false)
-    setProcessing(true)
-    
-    for (let i = 0; i < processingSteps.length; i++) {
-      setCurrentStep(i)
-      await new Promise(resolve => setTimeout(resolve, processingSteps[i].duration))
+    setError(null)
+
+    try {
+      // ─── Step 1: Upload to Cloudinary via backend ─────────────
+      const uploadResult = await uploadVideo(uploadedFile)
+
+      setUploading(false)
+      setProcessing(true)
+
+      // ─── Step 2: Run detection pipeline ───────────────────────
+      // Show step progress as the backend processes
+      // We advance steps on a timer to match the UI expectations,
+      // while the real pipeline runs in the background
+      const pipelinePromise = detectSimilarity(
+        uploadResult.url,
+        uploadResult.fileName,
+        uploadResult.contentId
+      )
+
+      // Animate through processing steps while pipeline runs
+      for (let i = 0; i < processingSteps.length; i++) {
+        setCurrentStep(i)
+        await new Promise(resolve => setTimeout(resolve, processingSteps[i].duration))
+      }
+
+      // Wait for the actual pipeline to complete
+      const detectResult = await pipelinePromise
+      setResults(detectResult.results)
+
+      // Show completion
+      setCurrentStep(processingSteps.length)
+      await new Promise(resolve => setTimeout(resolve, 1500))
+
+      setProcessing(false)
+      setCurrentStep(0)
+      setFile(null)
+
+    } catch (err) {
+      console.error('Upload/detect error:', err)
+      setError(err.message || 'Something went wrong. Please try again.')
+      setUploading(false)
+      setProcessing(false)
+      setCurrentStep(0)
     }
-    
-    setCurrentStep(processingSteps.length)
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    setProcessing(false)
-    setCurrentStep(0)
-    setFile(null)
   }
 
   return (
@@ -54,6 +86,11 @@ export default function Upload() {
         <Card className="p-8">
           {!uploading && !processing && (
             <div>
+              {error && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
               <label
                 htmlFor="file-upload"
                 className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all"
@@ -134,7 +171,11 @@ export default function Upload() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-green-900">Processing complete</p>
-                        <p className="text-sm text-green-700">Your content is now being monitored</p>
+                        <p className="text-sm text-green-700">
+                          {results && results.length > 0
+                            ? `Found ${results.length} matches. Check the Monitoring page.`
+                            : 'Your content is now being monitored'}
+                        </p>
                       </div>
                     </div>
                   </div>

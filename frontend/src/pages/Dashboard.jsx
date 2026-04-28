@@ -4,6 +4,7 @@ import Card from '../components/Card'
 import ActivityItem from '../components/ActivityItem'
 import MatchesChart from '../components/MatchesChart'
 import { generateActivityFeed } from '../utils/mockData'
+import { fetchStats, fetchActivity } from '../utils/api'
 
 export default function Dashboard() {
   const [activities, setActivities] = useState(generateActivityFeed())
@@ -13,17 +14,37 @@ export default function Dashboard() {
     monitoring: 'Active'
   })
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const newActivity = {
-        id: Date.now(),
-        title: 'New match detected',
-        similarity: Math.floor(Math.random() * 30) + 70,
-        time: 'Just now',
-        status: Math.random() > 0.5 ? 'high' : 'medium'
+  // Fetch real data from backend, fallback to mock data
+  const loadData = async () => {
+    try {
+      const [statsData, activityData] = await Promise.all([
+        fetchStats(),
+        fetchActivity()
+      ])
+
+      if (statsData) {
+        setStats({
+          matchesToday: statsData.matchesToday || 0,
+          highRisk: statsData.highRisk || 0,
+          monitoring: statsData.monitoring || 'Idle'
+        })
       }
-      setActivities(prev => [newActivity, ...prev.slice(0, 4)])
-      setStats(prev => ({ ...prev, matchesToday: prev.matchesToday + 1 }))
+
+      if (activityData && activityData.length > 0) {
+        setActivities(activityData)
+      }
+    } catch {
+      // Backend not available, keep using current/mock data
+    }
+  }
+
+  useEffect(() => {
+    // Initial fetch
+    loadData()
+
+    // Poll every 15 seconds for updates
+    const interval = setInterval(() => {
+      loadData()
     }, 15000)
 
     return () => clearInterval(interval)
