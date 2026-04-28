@@ -149,4 +149,14 @@ def compare_features():
 if __name__ == '__main__':
     port = int(os.environ.get('ML_SERVICE_PORT', 5001))
     logger.info(f'Starting ML Service on port {port}')
-    app.run(host='0.0.0.0', port=port, debug=True)
+    
+    # Pre-load CLIP model at startup to avoid cold-start delay on first request
+    logger.info('Pre-loading CLIP model at startup...')
+    try:
+        from services.embedding import _load_model
+        _load_model()
+        logger.info('CLIP model pre-loaded successfully')
+    except Exception as e:
+        logger.warning(f'Could not pre-load CLIP model: {e}. Will load on first request.')
+    
+    app.run(host='0.0.0.0', port=port, debug=False)

@@ -32,9 +32,16 @@ export const extractKeywordsWithGemini = async (videoContext) => {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
+    // Sanitize input: strip control characters, limit length, escape quotes
+    const sanitizedContext = String(videoContext)
+      .replace(/[\x00-\x1F\x7F]/g, ' ')  // Remove control characters
+      .replace(/[<>]/g, '')               // Remove angle brackets
+      .trim()
+      .slice(0, 200)                      // Limit to 200 chars to prevent injection
+
     const prompt = `You are a content analysis assistant. Given the following video title/filename/context, generate 5-8 YouTube search keywords or short phrases that would help find similar or re-uploaded versions of this video on YouTube.
 
-Video context: "${videoContext}"
+Video context: ${JSON.stringify(sanitizedContext)}
 
 Rules:
 - Return ONLY a JSON array of strings

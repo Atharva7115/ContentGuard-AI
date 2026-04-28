@@ -1,9 +1,19 @@
 /**
  * API Client
  * Centralized API calls to the ContentGuard AI backend.
+ * Uses VITE_API_URL env var in production, or empty string to use Vite's dev proxy.
  */
 
-const API_BASE = "https://contentguard-ai-1.onrender.com"
+const API_BASE = import.meta.env.VITE_API_URL || ""
+
+// Simple error logger
+const logError = (context, error) => {
+  console.error(`[API Error - ${context}]`, {
+    message: error.message,
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  })
+}
 
 /**
  * Upload Video
@@ -12,89 +22,124 @@ export const uploadVideo = async (file) => {
   const formData = new FormData()
   formData.append('file', file)
 
-  const response = await fetch(`${API_BASE}/api/upload`, {
-    method: 'POST',
-    body: formData,
-  })
+  try {
+    const response = await fetch(`${API_BASE}/api/upload`, {
+      method: 'POST',
+      body: formData,
+    })
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.message || 'Upload failed')
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.message || 'Upload failed')
+    }
+
+    return response.json()
+  } catch (error) {
+    logError('uploadVideo', error)
+    throw error
   }
-
-  return response.json()
 }
 
 /**
  * Detect Similarity (Existing)
  */
 export const detectSimilarity = async (videoUrl, fileName, contentId) => {
-  const response = await fetch(`${API_BASE}/api/detect`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, fileName, contentId }),
-  })
+  try {
+    const response = await fetch(`${API_BASE}/api/detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl, fileName, contentId }),
+    })
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.message || 'Detection failed')
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.message || 'Detection failed')
+    }
+
+    return response.json()
+  } catch (error) {
+    logError('detectSimilarity', error)
+    throw error
   }
-
-  return response.json()
 }
 
 /**
  * 🔥 ML ANALYSIS (NEW - Connected to your deployment)
  */
 export const analyzeWithML = async (payload) => {
-  const response = await fetch(`${API_BASE}/api/predict`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
+  try {
+    const response = await fetch(`${API_BASE}/api/predict`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.message || 'ML Analysis failed')
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.message || 'ML Analysis failed')
+    }
+
+    return response.json()
+  } catch (error) {
+    logError('analyzeWithML', error)
+    throw error
   }
-
-  return response.json()
 }
 
 /**
  * Fetch Stats
  */
 export const fetchStats = async () => {
-  const response = await fetch(`${API_BASE}/api/stats`)
-  if (!response.ok) throw new Error('Failed to fetch stats')
-  return response.json()
+  try {
+    const response = await fetch(`${API_BASE}/api/stats`)
+    if (!response.ok) throw new Error('Failed to fetch stats')
+    return response.json()
+  } catch (error) {
+    logError('fetchStats', error)
+    throw error
+  }
 }
 
 /**
  * Fetch Activity
  */
 export const fetchActivity = async () => {
-  const response = await fetch(`${API_BASE}/api/activity`)
-  if (!response.ok) throw new Error('Failed to fetch activity')
-  return response.json()
+  try {
+    const response = await fetch(`${API_BASE}/api/activity`)
+    if (!response.ok) throw new Error('Failed to fetch activity')
+    return response.json()
+  } catch (error) {
+    logError('fetchActivity', error)
+    throw error
+  }
 }
 
 /**
  * Fetch Content
  */
 export const fetchContent = async () => {
-  const response = await fetch(`${API_BASE}/api/content`)
-  if (!response.ok) throw new Error('Failed to fetch content')
-  return response.json()
+  try {
+    const response = await fetch(`${API_BASE}/api/content`)
+    if (!response.ok) throw new Error('Failed to fetch content')
+    return response.json()
+  } catch (error) {
+    logError('fetchContent', error)
+    throw error
+  }
 }
 
 /**
  * Fetch Matches
  */
 export const fetchMatches = async (contentId) => {
-  const response = await fetch(`${API_BASE}/api/detect/matches/${contentId}`)
-  if (!response.ok) throw new Error('Failed to fetch matches')
-  return response.json()
+  try {
+    const response = await fetch(`${API_BASE}/api/detect/matches/${contentId}`)
+    if (!response.ok) throw new Error('Failed to fetch matches')
+    return response.json()
+  } catch (error) {
+    logError('fetchMatches', error)
+    throw error
+  }
 }

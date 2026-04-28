@@ -7,15 +7,13 @@ import { generateActivityFeed } from '../utils/mockData'
 import { fetchStats, fetchActivity } from '../utils/api'
 
 export default function Dashboard() {
-  const [activities, setActivities] = useState(generateActivityFeed())
-  const [stats, setStats] = useState({
-    matchesToday: 24,
-    highRisk: 8,
-    monitoring: 'Active'
-  })
+  const [activities, setActivities] = useState([])
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   // Fetch real data from backend, fallback to mock data
-  const loadData = async () => {
+  const loadData = async (isInitial = false) => {
+    if (isInitial) setLoading(true)
     try {
       const [statsData, activityData] = await Promise.all([
         fetchStats(),
@@ -24,8 +22,8 @@ export default function Dashboard() {
 
       if (statsData) {
         setStats({
-          matchesToday: statsData.matchesToday || 0,
-          highRisk: statsData.highRisk || 0,
+          matchesToday: statsData.matchesToday ?? 0,
+          highRisk: statsData.highRisk ?? 0,
           monitoring: statsData.monitoring || 'Idle'
         })
       }
@@ -34,19 +32,19 @@ export default function Dashboard() {
         setActivities(activityData)
       }
     } catch {
-      // Backend not available, keep using current/mock data
+      // Backend not available — fall back to mock data only on initial load
+      if (isInitial) {
+        setStats({ matchesToday: 24, highRisk: 8, monitoring: 'Active' })
+        setActivities(generateActivityFeed())
+      }
+    } finally {
+      if (isInitial) setLoading(false)
     }
   }
 
   useEffect(() => {
-    // Initial fetch
-    loadData()
-
-    // Poll every 15 seconds for updates
-    const interval = setInterval(() => {
-      loadData()
-    }, 15000)
-
+    loadData(true)
+    const interval = setInterval(() => loadData(false), 15000)
     return () => clearInterval(interval)
   }, [])
 
@@ -57,23 +55,31 @@ export default function Dashboard() {
         <p className="mt-1 text-sm text-gray-600">Monitor your content protection in real-time</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard
-          title="Matches Detected Today"
-          value={stats.matchesToday}
-          change="+12% from yesterday"
-        />
-        <StatCard
-          title="High Risk Content"
-          value={stats.highRisk}
-          change="Requires attention"
-        />
-        <StatCard
-          title="Monitoring Status"
-          value={stats.monitoring}
-          change="All systems operational"
-        />
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-28 bg-gray-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard
+            title="Matches Detected Today"
+            value={stats.matchesToday}
+            change="+12% from yesterday"
+          />
+          <StatCard
+            title="High Risk Content"
+            value={stats.highRisk}
+            change="Requires attention"
+          />
+          <StatCard
+            title="Monitoring Status"
+            value={stats.monitoring}
+            change="All systems operational"
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">

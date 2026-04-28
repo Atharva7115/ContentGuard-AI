@@ -5,22 +5,32 @@ import { monitoredContent as mockContent, generateMockMatches } from '../utils/m
 import { fetchContent, fetchMatches } from '../utils/api'
 
 export default function Monitoring() {
-  const [contentList, setContentList] = useState(mockContent)
-  const [selectedContent, setSelectedContent] = useState(mockContent[0])
-  const [matches, setMatches] = useState(generateMockMatches())
-  const [loading, setLoading] = useState(false)
+  const [contentList, setContentList] = useState([])
+  const [selectedContent, setSelectedContent] = useState(null)
+  const [matches, setMatches] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [matchesLoading, setMatchesLoading] = useState(false)
 
   // Load real content list from backend
   useEffect(() => {
     const loadContent = async () => {
+      setLoading(true)
       try {
         const data = await fetchContent()
         if (data && data.length > 0) {
           setContentList(data)
           setSelectedContent(data[0])
+        } else {
+          // Fall back to mock data if backend returns empty
+          setContentList(mockContent)
+          setSelectedContent(mockContent[0])
         }
       } catch {
         // Keep mock data if backend unavailable
+        setContentList(mockContent)
+        setSelectedContent(mockContent[0])
+      } finally {
+        setLoading(false)
       }
     }
     loadContent()
@@ -31,19 +41,18 @@ export default function Monitoring() {
     const loadMatches = async () => {
       if (!selectedContent?.id) return
 
-      setLoading(true)
+      setMatchesLoading(true)
       try {
         const data = await fetchMatches(selectedContent.id)
         if (data?.matches && data.matches.length > 0) {
           setMatches(data.matches)
         } else {
-          // Use mock data if no real matches yet
           setMatches(generateMockMatches())
         }
       } catch {
         setMatches(generateMockMatches())
       } finally {
-        setLoading(false)
+        setMatchesLoading(false)
       }
     }
     loadMatches()
@@ -56,6 +65,12 @@ export default function Monitoring() {
         <p className="mt-1 text-sm text-gray-600">Track and manage your protected content</p>
       </div>
 
+      {loading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="h-64 bg-gray-100 rounded-xl animate-pulse" />
+          <div className="lg:col-span-3 h-64 bg-gray-100 rounded-xl animate-pulse" />
+        </div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Your Content</h2>
@@ -65,7 +80,7 @@ export default function Monitoring() {
                 key={content.id}
                 onClick={() => setSelectedContent(content)}
                 className={`w-full text-left p-3 rounded-lg border transition-all ${
-                  selectedContent.id === content.id
+                  selectedContent?.id === content.id
                     ? 'border-blue-600 bg-blue-50'
                     : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                 }`}
@@ -85,6 +100,7 @@ export default function Monitoring() {
           </div>
         </Card>
 
+        {selectedContent && (
         <Card className="lg:col-span-3 p-6">
           <div className="flex items-start gap-4 mb-6 pb-6 border-b border-gray-200">
             <img
@@ -121,7 +137,7 @@ export default function Monitoring() {
 
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Detected Matches</h3>
-            {loading ? (
+            {matchesLoading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
@@ -181,7 +197,9 @@ export default function Monitoring() {
             )}
           </div>
         </Card>
+        )}
       </div>
+      )}
     </div>
   )
 }

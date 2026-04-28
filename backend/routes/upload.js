@@ -33,10 +33,13 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const videoTypes = /mp4|mov|avi|mkv|webm|flv|wmv/
     const ext = path.extname(file.originalname).toLowerCase().slice(1)
-    if (videoTypes.test(ext) || file.mimetype.startsWith('video/')) {
+    const mimeTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/x-flv', 'video/x-ms-wmv']
+    
+    if ((videoTypes.test(ext) || file.mimetype.startsWith('video/')) && 
+        (mimeTypes.includes(file.mimetype) || file.mimetype.startsWith('video/'))) {
       cb(null, true)
     } else {
-      cb(new Error('Only video files are allowed'), false)
+      cb(new Error(`Invalid file type. Allowed: ${videoTypes.source}. Got: ${ext} (${file.mimetype})`), false)
     }
   }
 })
