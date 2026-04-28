@@ -78,12 +78,12 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'ContentGuard AI API is running' })
 })
 
-// POST /api/predict - Proxy to external ML service
+// POST /api/predict - Proxy to external ML service (/extract endpoint)
 app.post('/api/predict', async (req, res) => {
-  const ML_PREDICT_URL = process.env.ML_PREDICT_URL || 'https://ccai3-ml.onrender.com/predict'
+  const ML_BASE_URL = process.env.ML_BASE_URL || 'https://ccai3-ml.onrender.com'
 
   try {
-    const mlResponse = await fetch(ML_PREDICT_URL, {
+    const mlResponse = await fetch(`${ML_BASE_URL}/extract`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req.body),
@@ -91,9 +91,16 @@ app.post('/api/predict', async (req, res) => {
 
     const data = await mlResponse.json().catch(() => null)
 
+    if (mlResponse.status === 404) {
+      return res.status(502).json({
+        error: 'ML service unavailable',
+        message: 'ML endpoint not found',
+      })
+    }
+
     if (!mlResponse.ok) {
-      return res.status(mlResponse.status).json({
-        error: 'ML service error',
+      return res.status(502).json({
+        error: 'ML service unavailable',
         message: data?.message || data?.error || `ML service returned ${mlResponse.status}`,
       })
     }
@@ -102,7 +109,7 @@ app.post('/api/predict', async (req, res) => {
   } catch (error) {
     console.error('❌ /api/predict proxy error:', error.message)
     return res.status(502).json({
-      error: 'ML service unreachable',
+      error: 'ML service unavailable',
       message: error.message,
     })
   }

@@ -1,84 +1,111 @@
 /**
  * ML Service Client
- * Forwards requests to the deployed external ML service.
- * ML Service URL: https://ccai3-ml.onrender.com/predict
+ * Communicates with the deployed external ML service.
+ *
+ * Verified live endpoints (https://ccai3-ml.onrender.com):
+ *   GET  /health   → { status: 'ok' }
+ *   POST /extract  → { success, frame_count, hashes, embeddings }
+ *   POST /compare  → { success, similarity, confidence, matched_frames }
+ *
+ * NOTE: /predict does NOT exist on this service — use /extract and /compare.
  */
 
 import axios from 'axios'
 import dotenv from 'dotenv'
 dotenv.config()
 
-const ML_PREDICT_URL = process.env.ML_PREDICT_URL || 'https://ccai3-ml.onrender.com/predict'
-const ML_TIMEOUT = parseInt(process.env.ML_TIMEOUT_MS || '180000', 10)
+const ML_BASE_URL = process.env.ML_BASE_URL || 'https://ccai3-ml.onrender.com'
+const ML_TIMEOUT  = parseInt(process.env.ML_TIMEOUT_MS || '180000', 10)
 
 const mlClient = axios.create({
+  baseURL: ML_BASE_URL,
   timeout: ML_TIMEOUT,
   headers: { 'Content-Type': 'application/json' },
 })
 
-/**
- * Send a prediction request to the external ML service.
- *
- * @param {object} payload - Request body to forward
- * @returns {object} ML service response data
- */
-export const callMLService = async (payload) => {
-  try {
-    const response = await mlClient.post(ML_PREDICT_URL, payload)
-    return response.data
-  } catch (error) {
-    const status = error.response?.status
-    const msg = error.response?.data?.error || error.response?.data?.message || error.message
-    console.error(`❌ ML service error (${status || 'no response'}): ${msg}`)
-    const err = new Error(msg || 'ML service unavailable')
-    err.status = status || 502
+// ─── Shared error handler ────────────────────────────────────────────────────
+
+const handleMLError = (error, context) => {
+  const status = error.response?.status
+  const body   = error.response?.data
+
+  // 404 means the route doesn't exist on the ML service
+  if (status === 404) {
+    console.error(`❌ ML endpoint not found (404) [${context}]`)
+    const err = new Error('ML endpoint not found')
+    err.status = 502
     throw err
   }
+
+  const msg = body?.error || body?.message || error.message || 'ML service unavailable'
+  console.error(`❌ ML service error (${status || 'no response'}) [${context}]: ${msg}`)
+  const err = new Error(msg)
+  err.status = status || 502
+  throw err
 }
 
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 /**
- * Extract features from a video URL via the ML service.
+ * Extract frames, hashes, and CLIP embeddings from a video URL.
  *
- * @param {string} videoUrl
+ * POST /extract
+ * Body: { videoUrl: string, isYouTube: boolean }
+ *
+ * @param {string}  videoUrl
  * @param {boolean} isYouTube
- * @returns {object} { frame_count, hashes, embeddings }
+ * @returns {{ frame_count: number, hashes: string[], embeddings: number[][] }}
  */
 export const extractFeatures = async (videoUrl, isYouTube = false) => {
   console.log(`🔬 Extracting features: ${videoUrl} (YouTube: ${isYouTube})`)
-  const data = await callMLService({ action: 'extract', videoUrl, isYouTube })
 
-  if (!data.success) {
-    throw new Error(data.error || 'Feature extraction failed')
-  }
+  try {
+    const { data } = await mlClient.post('/extract', { videoUrl, isYouTube })
 
-  return {
-    frame_count: data.frame_count,
-    hashes: data.hashes,
-    embeddings: data.embeddings,
+    if (!data.success) {
+      throw new Error(data.error || 'Feature extraction failed')
+    }
+
+    console.log(`   ✅ Extracted ${data.frame_count} frames`)
+    return {
+      frame_count: data.frame_count,
+      hashes:      data.hashes,
+      embeddings:  data.embeddings,
+    }
+  } catch (error) {
+    if (error.response !== undefined) handleMLError(error, 'extractFeatures')
+    throw error  // re-throw errors we already formatted
   }
 }
 
 /**
- * Compare two feature sets via the ML service.
+ * Compare two feature sets and return a similarity score.
  *
- * @param {object} sourceFeatures - { hashes, embeddings }
- * @param {object} targetFeatures - { hashes, embeddings }
- * @returns {object} { similarity, confidence, matched_frames }
+ * POST /compare
+ * Body: { source: { hashes, embeddings }, target: { hashes, embeddings } }
+ *
+ * @param {{ hashes: string[], embeddings: number[][] }} sourceFeatures
+ * @param {{ hashes: string[], embeddings: number[][] }} targetFeatures
+ * @returns {{ similarity: number, confidence: string, matched_frames: number }}
  */
 export const compareFeatures = async (sourceFeatures, targetFeatures) => {
-  const data = await callMLService({
-    action: 'compare',
-    source: { hashes: sourceFeatures.hashes, embeddings: sourceFeatures.embeddings },
-    target: { hashes: targetFeatures.hashes, embeddings: targetFeatures.embeddings },
-  })
+  try {
+    const { data } = await mlClient.post('/compare', {
+      source: { hashes: sourceFeatures.hashes, embeddings: sourceFeatures.embeddings },
+      target: { hashes: targetFeatures.hashes, embeddings: targetFeatures.embeddings },
+    })
 
-  if (!data.success) {
-    throw new Error(data.error || 'Comparison failed')
-  }
+    if (!data.success) {
+      throw new Error(data.error || 'Comparison failed')
+    }
 
-  return {
-    similarity: data.similarity,
-    confidence: data.confidence,
-    matched_frames: data.matched_frames,
+    return {
+      similarity:     data.similarity,
+      confidence:     data.confidence,
+      matched_frames: data.matched_frames,
+    }
+  } catch (error) {
+    if (error.response !== undefined) handleMLError(error, 'compareFeatures')
+    throw error
   }
 }
