@@ -1,19 +1,31 @@
+/**
+ * Detect Route
+ * POST /api/detect - Full similarity detection pipeline.
+ * GET  /api/detect/matches/:contentId - Get matches for a content piece.
+ */
+
 import express from 'express'
-import { 
-  detectSimilarity, 
-  getMatches, 
-  updateMatchStatus 
-} from '../controllers/detectController.js'
+import { runDetectionPipeline } from '../controllers/detectController.js'
+import { detectionStore } from '../utils/store.js'
 
 const router = express.Router()
 
-// Detect similarity between content
-router.post('/similarity', detectSimilarity)
+// ─── POST /api/detect ───────────────────────────────────────────
+// Full pipeline: extract features → Gemini keywords → YouTube search → compare
+router.post('/', runDetectionPipeline)
 
-// Get all matches for a content piece
-router.get('/matches/:contentId', getMatches)
+// ─── GET /api/detect/matches/:contentId ─────────────────────────
+// Return stored matches for a specific content piece
+router.get('/matches/:contentId', (req, res) => {
+  const contentId = parseInt(req.params.contentId)
+  const matches = detectionStore.results.filter(r => r.contentId === contentId)
 
-// Update match status (reviewed, flagged, etc.)
-router.patch('/matches/:matchId', updateMatchStatus)
+  res.json({
+    success: true,
+    contentId,
+    count: matches.length,
+    matches
+  })
+})
 
 export default router

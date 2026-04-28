@@ -1,9 +1,14 @@
+/**
+ * YouTube Controller
+ * Handles YouTube search and video details endpoints.
+ */
+
 import { searchVideos, fetchVideoDetails } from '../services/youtubeService.js'
 
 // Search YouTube for similar content
 export const searchYouTube = async (req, res) => {
   try {
-    const { keywords, maxResults = 50 } = req.body
+    const { keywords, maxResults = 5 } = req.body
 
     if (!keywords || keywords.length === 0) {
       return res.status(400).json({ error: 'Keywords are required' })
@@ -26,16 +31,11 @@ export const searchYouTube = async (req, res) => {
 export const getVideoDetails = async (req, res) => {
   try {
     const { videoId } = req.params
-
     const details = await fetchVideoDetails(videoId)
-
-    res.json({
-      success: true,
-      details
-    })
+    res.json({ success: true, details })
   } catch (error) {
     console.error('Video details error:', error)
-    res.status(500).json({ error: 'Failed to fetch video details', message: error.message })
+    res.status(500).json({ error: 'Failed to fetch details', message: error.message })
   }
 }
 
@@ -43,8 +43,6 @@ export const getVideoDetails = async (req, res) => {
 export const monitorContent = async (req, res) => {
   try {
     const { contentId, keywords, frequency = 10 } = req.body
-
-    // In production, this would set up a scheduled job
     res.json({
       success: true,
       contentId,
