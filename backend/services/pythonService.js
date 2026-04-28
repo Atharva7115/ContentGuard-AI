@@ -1,124 +1,84 @@
 /**
- * Python ML Service Client
- * HTTP client to communicate with the Python Flask ML service.
+ * ML Service Client
+ * Forwards requests to the deployed external ML service.
+ * ML Service URL: https://ccai3-ml.onrender.com/predict
  */
 
 import axios from 'axios'
 import dotenv from 'dotenv'
 dotenv.config()
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:5001'
-
-// Timeout in ms: default 3 minutes, configurable via env
+const ML_PREDICT_URL = process.env.ML_PREDICT_URL || 'https://ccai3-ml.onrender.com/predict'
 const ML_TIMEOUT = parseInt(process.env.ML_TIMEOUT_MS || '180000', 10)
 
-// Axios instance with reasonable timeouts
 const mlClient = axios.create({
-  baseURL: ML_SERVICE_URL,
   timeout: ML_TIMEOUT,
+  headers: { 'Content-Type': 'application/json' },
 })
 
 /**
- * Check if ML service is running.
- * @returns {boolean}
+ * Send a prediction request to the external ML service.
+ *
+ * @param {object} payload - Request body to forward
+ * @returns {object} ML service response data
  */
-export const isMLServiceHealthy = async () => {
+export const callMLService = async (payload) => {
   try {
-    const resp = await mlClient.get('/health', { timeout: 5000 })
-    return resp.data.status === 'ok'
-  } catch {
-    return false
+    const response = await mlClient.post(ML_PREDICT_URL, payload)
+    return response.data
+  } catch (error) {
+    const status = error.response?.status
+    const msg = error.response?.data?.error || error.response?.data?.message || error.message
+    console.error(`❌ ML service error (${status || 'no response'}): ${msg}`)
+    const err = new Error(msg || 'ML service unavailable')
+    err.status = status || 502
+    throw err
   }
 }
 
 /**
- * Extract features (frames, hashes, embeddings) from a video URL.
- * Includes retry logic for transient failures.
- * 
- * @param {string} videoUrl - URL of the video
- * @param {boolean} isYouTube - Whether this is a YouTube video
- * @param {number} retries - Number of retry attempts (default 2)
- * @returns {{ frame_count: number, hashes: string[], embeddings: number[][] }}
+ * Extract features from a video URL via the ML service.
+ *
+ * @param {string} videoUrl
+ * @param {boolean} isYouTube
+ * @returns {object} { frame_count, hashes, embeddings }
  */
-export const extractFeatures = async (videoUrl, isYouTube = false, retries = 2) => {
-  let lastError
-  
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      if (attempt > 0) {
-        console.log(`🔄 Retry attempt ${attempt}/${retries} for: ${videoUrl}`)
-        // Exponential backoff: 2s, 4s, 8s...
-        await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, attempt - 1)))
-      }
+export const extractFeatures = async (videoUrl, isYouTube = false) => {
+  console.log(`🔬 Extracting features: ${videoUrl} (YouTube: ${isYouTube})`)
+  const data = await callMLService({ action: 'extract', videoUrl, isYouTube })
 
-      console.log(`🔬 Extracting features: ${videoUrl} (YouTube: ${isYouTube})`)
-
-      const response = await mlClient.post('/extract', {
-        videoUrl,
-        isYouTube
-      })
-
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Feature extraction failed')
-      }
-
-      return {
-        frame_count: response.data.frame_count,
-        hashes: response.data.hashes,
-        embeddings: response.data.embeddings
-      }
-    } catch (error) {
-      lastError = error
-      const msg = error.response?.data?.error || error.message
-      
-      // Don't retry on certain errors
-      if (msg.includes('not found') || msg.includes('invalid') || error.response?.status === 400) {
-        console.error(`❌ ML Service extract error (non-retryable): ${msg}`)
-        throw new Error(`Feature extraction failed: ${msg}`)
-      }
-      
-      if (attempt === retries) {
-        console.error(`❌ ML Service extract error (all retries exhausted): ${msg}`)
-      }
-    }
+  if (!data.success) {
+    throw new Error(data.error || 'Feature extraction failed')
   }
-  
-  const msg = lastError?.response?.data?.error || lastError?.message || 'Unknown error'
-  throw new Error(`Feature extraction failed after ${retries + 1} attempts: ${msg}`)
+
+  return {
+    frame_count: data.frame_count,
+    hashes: data.hashes,
+    embeddings: data.embeddings,
+  }
 }
 
 /**
- * Compare two feature sets and return similarity.
- * 
+ * Compare two feature sets via the ML service.
+ *
  * @param {object} sourceFeatures - { hashes, embeddings }
  * @param {object} targetFeatures - { hashes, embeddings }
- * @returns {{ similarity: number, confidence: string, matched_frames: number }}
+ * @returns {object} { similarity, confidence, matched_frames }
  */
 export const compareFeatures = async (sourceFeatures, targetFeatures) => {
-  try {
-    const response = await mlClient.post('/compare', {
-      source: {
-        hashes: sourceFeatures.hashes,
-        embeddings: sourceFeatures.embeddings
-      },
-      target: {
-        hashes: targetFeatures.hashes,
-        embeddings: targetFeatures.embeddings
-      }
-    })
+  const data = await callMLService({
+    action: 'compare',
+    source: { hashes: sourceFeatures.hashes, embeddings: sourceFeatures.embeddings },
+    target: { hashes: targetFeatures.hashes, embeddings: targetFeatures.embeddings },
+  })
 
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Comparison failed')
-    }
+  if (!data.success) {
+    throw new Error(data.error || 'Comparison failed')
+  }
 
-    return {
-      similarity: response.data.similarity,
-      confidence: response.data.confidence,
-      matched_frames: response.data.matched_frames
-    }
-  } catch (error) {
-    const msg = error.response?.data?.error || error.message
-    console.error(`❌ ML Service compare error: ${msg}`)
-    throw new Error(`Feature comparison failed: ${msg}`)
+  return {
+    similarity: data.similarity,
+    confidence: data.confidence,
+    matched_frames: data.matched_frames,
   }
 }
