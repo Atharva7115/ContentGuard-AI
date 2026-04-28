@@ -21,6 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('ml-service')
 
+
 # ─── Flask App ───────────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
