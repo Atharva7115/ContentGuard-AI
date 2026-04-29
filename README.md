@@ -1,6 +1,20 @@
 # ContentGuard AI - Automated YouTube Content Monitoring System
 
+## 🌐 Live Demo
+
+👉 [Live Demo Link] : https://ccai3-7xk4n36o2-sameer4445s-projects.vercel.app
+
+> ⚠️ **Note:** The live deployment is hosted from a parallel repository due to initial collaboration access issues.  
+> Both repositories contain identical code and commit history, and represent the same project.
+
 A production-quality SaaS platform for monitoring and protecting original content from unauthorized use on YouTube.
+
+## 📌 Repository Note
+
+This repository serves as the primary submission repository.  
+The deployed version is hosted from a mirrored repository used during development due to access constraints.
+
+All code, commits, and functionality are consistent across both repositories.
 
 ## Project Structure
 
