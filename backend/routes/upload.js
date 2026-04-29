@@ -1,93 +1,107 @@
 /**
  * Upload Route
- * POST /api/upload - Accept video file, upload to Cloudinary, return URL.
+ * POST /api/upload — Accept video file, upload to Cloudinary, return URL + contentId.
  */
 
 import express from 'express'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
+import { fileURLToPath } from 'url'
 import { uploadVideo } from '../services/cloudinaryService.js'
 import { detectionStore } from '../utils/store.js'
 
 const router = express.Router()
 
-// ─── Multer Setup (Temp Storage) ────────────────────────────────
+// ─── Upload directory ────────────────────────────────────────────
+// Use an absolute path so it works on both local and Render (ephemeral FS)
+const __dirname  = path.dirname(fileURLToPath(import.meta.url))
+const UPLOAD_DIR = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : path.join(__dirname, '..', 'uploads')
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+}
+
+// ─── Multer ──────────────────────────────────────────────────────
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = './uploads'
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-    cb(null, uploadDir)
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`
-    cb(null, uniqueName)
-  }
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename:    (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 })
+
+const ALLOWED_EXTS  = /mp4|mov|avi|mkv|webm|flv|wmv/
+const ALLOWED_MIMES = new Set([
+  'video/mp4', 'video/quicktime', 'video/x-msvideo',
+  'video/x-matroska', 'video/webm', 'video/x-flv', 'video/x-ms-wmv',
+])
 
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB
-  fileFilter: (req, file, cb) => {
-    const videoTypes = /mp4|mov|avi|mkv|webm|flv|wmv/
+  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || String(2 * 1024 * 1024 * 1024)) },
+  fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase().slice(1)
-    const mimeTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/x-flv', 'video/x-ms-wmv']
-    
-    if ((videoTypes.test(ext) || file.mimetype.startsWith('video/')) && 
-        (mimeTypes.includes(file.mimetype) || file.mimetype.startsWith('video/'))) {
+    if (ALLOWED_EXTS.test(ext) && (ALLOWED_MIMES.has(file.mimetype) || file.mimetype.startsWith('video/'))) {
       cb(null, true)
     } else {
-      cb(new Error(`Invalid file type. Allowed: ${videoTypes.source}. Got: ${ext} (${file.mimetype})`), false)
+      cb(new Error(`Invalid file type "${ext}" (${file.mimetype}). Allowed: mp4, mov, avi, mkv, webm, flv, wmv`))
     }
-  }
+  },
 })
 
-// ─── POST /api/upload ───────────────────────────────────────────
-router.post('/', upload.single('file'), async (req, res) => {
-  try {
-    const file = req.file
-    if (!file) {
-      return res.status(400).json({ error: 'No file uploaded' })
+// ─── POST /api/upload ────────────────────────────────────────────
+router.post('/', (req, res, next) => {
+  // Run multer manually so we can return clean JSON on multer errors
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ error: 'Upload error', message: err.message })
     }
+    if (err) {
+      return res.status(400).json({ error: 'Invalid file', message: err.message })
+    }
+    next()
+  })
+}, async (req, res) => {
+  const file = req.file
 
-    console.log(`📁 File received: ${file.originalname} (${(file.size / (1024*1024)).toFixed(1)} MB)`)
+  if (!file) {
+    return res.status(400).json({ error: 'No file uploaded', message: 'Attach a video file with field name "file"' })
+  }
 
-    // Upload to Cloudinary
+  console.log(`📁 Received: ${file.originalname} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`)
+
+  try {
     const result = await uploadVideo(file.path, file.originalname)
 
-    // Clean up temp file
+    // Clean up temp file after Cloudinary upload
     try { fs.unlinkSync(file.path) } catch {}
 
-    // Store content metadata for dashboard
     const contentItem = {
-      id: detectionStore.contentList.length + 1,
-      title: file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
-      thumbnail: result.url.replace(/\.[^.]+$/, '.jpg'), // Cloudinary auto-generates thumbnails
+      id:         detectionStore.contentList.length + 1,
+      title:      file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
+      thumbnail:  result.url.replace(/\.[^.]+$/, '.jpg'),
       uploadDate: new Date().toISOString().split('T')[0],
-      status: 'active',
-      matches: 0,
-      videoUrl: result.url,
-      publicId: result.publicId
+      status:     'active',
+      matches:    0,
+      videoUrl:   result.url,
+      publicId:   result.publicId,
     }
     detectionStore.contentList.push(contentItem)
 
-    res.json({
-      success: true,
-      message: 'File uploaded successfully',
-      url: result.url,
+    console.log(`✅ Uploaded to Cloudinary: ${result.url}`)
+
+    return res.json({
+      success:   true,
+      message:   'File uploaded successfully',
+      url:       result.url,
       contentId: contentItem.id,
-      fileName: file.originalname
+      fileName:  file.originalname,
     })
 
   } catch (error) {
-    // Clean up temp file on error
-    if (req.file) {
-      try { fs.unlinkSync(req.file.path) } catch {}
-    }
+    try { fs.unlinkSync(file.path) } catch {}
     console.error('❌ Upload error:', error.message)
-    res.status(500).json({ error: 'Upload failed', message: error.message })
+    return res.status(500).json({ error: 'Upload failed', message: error.message })
   }
 })
 

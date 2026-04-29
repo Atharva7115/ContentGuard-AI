@@ -3,11 +3,9 @@
  * Communicates with the deployed external ML service.
  *
  * Verified live endpoints (https://ccai3-ml.onrender.com):
- *   GET  /health   → { status: 'ok' }
- *   POST /extract  → { success, frame_count, hashes, embeddings }
- *   POST /compare  → { success, similarity, confidence, matched_frames }
- *
- * NOTE: /predict does NOT exist on this service — use /extract and /compare.
+ *   GET  /health  → { status: 'ok' }
+ *   POST /extract → { success, frame_count, hashes, embeddings }
+ *   POST /compare → { success, similarity, confidence, matched_frames }
  */
 
 import axios from 'axios'
@@ -23,24 +21,35 @@ const mlClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// ─── Shared error handler ────────────────────────────────────────────────────
+// ─── Shared error normaliser ─────────────────────────────────────────────────
 
-const handleMLError = (error, context) => {
+/**
+ * Converts any axios error into a clean Error with an appropriate message.
+ * Always throws — never returns.
+ */
+const throwMLError = (error, context) => {
   const status = error.response?.status
   const body   = error.response?.data
 
-  // 404 means the route doesn't exist on the ML service
   if (status === 404) {
-    console.error(`❌ ML endpoint not found (404) [${context}]`)
+    console.error(`❌ [${context}] ML endpoint not found (404)`)
     const err = new Error('ML endpoint not found')
     err.status = 502
     throw err
   }
 
+  if (!error.response) {
+    // Network error — service unreachable (ECONNREFUSED, timeout, DNS, etc.)
+    console.error(`❌ [${context}] ML service unreachable: ${error.message}`)
+    const err = new Error('ML service unavailable')
+    err.status = 502
+    throw err
+  }
+
   const msg = body?.error || body?.message || error.message || 'ML service unavailable'
-  console.error(`❌ ML service error (${status || 'no response'}) [${context}]: ${msg}`)
+  console.error(`❌ [${context}] ML service error (${status}): ${msg}`)
   const err = new Error(msg)
-  err.status = status || 502
+  err.status = 502
   throw err
 }
 
@@ -59,22 +68,25 @@ const handleMLError = (error, context) => {
 export const extractFeatures = async (videoUrl, isYouTube = false) => {
   console.log(`🔬 Extracting features: ${videoUrl} (YouTube: ${isYouTube})`)
 
+  let data
   try {
-    const { data } = await mlClient.post('/extract', { videoUrl, isYouTube })
-
-    if (!data.success) {
-      throw new Error(data.error || 'Feature extraction failed')
-    }
-
-    console.log(`   ✅ Extracted ${data.frame_count} frames`)
-    return {
-      frame_count: data.frame_count,
-      hashes:      data.hashes,
-      embeddings:  data.embeddings,
-    }
+    const response = await mlClient.post('/extract', { videoUrl, isYouTube })
+    data = response.data
   } catch (error) {
-    if (error.response !== undefined) handleMLError(error, 'extractFeatures')
-    throw error  // re-throw errors we already formatted
+    throwMLError(error, 'extractFeatures')
+  }
+
+  if (!data.success) {
+    const err = new Error(data.error || 'Feature extraction failed')
+    err.status = 502
+    throw err
+  }
+
+  console.log(`   ✅ Extracted ${data.frame_count} frames`)
+  return {
+    frame_count: data.frame_count,
+    hashes:      data.hashes,
+    embeddings:  data.embeddings,
   }
 }
 
@@ -89,23 +101,26 @@ export const extractFeatures = async (videoUrl, isYouTube = false) => {
  * @returns {{ similarity: number, confidence: string, matched_frames: number }}
  */
 export const compareFeatures = async (sourceFeatures, targetFeatures) => {
+  let data
   try {
-    const { data } = await mlClient.post('/compare', {
+    const response = await mlClient.post('/compare', {
       source: { hashes: sourceFeatures.hashes, embeddings: sourceFeatures.embeddings },
       target: { hashes: targetFeatures.hashes, embeddings: targetFeatures.embeddings },
     })
-
-    if (!data.success) {
-      throw new Error(data.error || 'Comparison failed')
-    }
-
-    return {
-      similarity:     data.similarity,
-      confidence:     data.confidence,
-      matched_frames: data.matched_frames,
-    }
+    data = response.data
   } catch (error) {
-    if (error.response !== undefined) handleMLError(error, 'compareFeatures')
-    throw error
+    throwMLError(error, 'compareFeatures')
+  }
+
+  if (!data.success) {
+    const err = new Error(data.error || 'Comparison failed')
+    err.status = 502
+    throw err
+  }
+
+  return {
+    similarity:     data.similarity,
+    confidence:     data.confidence,
+    matched_frames: data.matched_frames,
   }
 }
